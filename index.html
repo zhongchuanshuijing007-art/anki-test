@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暗記テスト管理</title>
+
+<style>
+body {
+  font-family: sans-serif;
+  padding: 10px;
+}
+
+button {
+  margin: 6px 0;
+  padding: 10px 16px;
+  font-size: 16px;
+  width: 100%;
+  max-width: 300px;
+}
+
+input, select {
+  padding: 10px;
+  font-size: 16px;
+  width: 100%;
+  max-width: 300px;
+  margin: 4px 0;
+}
+
+table {
+  width: 100%;
+  font-size: 14px;
+}
+
+.hidden {
+  display: none;
+}
+</style>
+</head>
+
+<body>
+
+<h1>暗記テスト管理</h1>
+
+<!-- ================= 先生エリア ================= -->
+<div id="teacherArea">
+
+<h2>単元設定</h2>
+<input type="text" id="unitName" placeholder="単元名">
+<button onclick="setUnit()">単元を設定</button>
+<p>現在の単元：<span id="currentUnit">未設定</span></p>
+
+<h2>問題追加</h2>
+<input type="text" id="questionText" placeholder="問題文">
+<input type="text" id="answerText" placeholder="正解（カンマ区切りで複数可）">
+<button onclick="addQuestion()">問題追加</button>
+
+<h2>問題一覧</h2>
+<ul id="questionList"></ul>
+
+<h2>生徒追加</h2>
+<input type="text" id="studentName" placeholder="生徒名">
+<input type="password" id="studentPass" placeholder="パスワード">
+<button onclick="addStudent()">追加</button>
+
+<h2>生徒一覧</h2>
+<table border="1">
+<thead>
+<tr><th>名前</th><th>点数</th><th>削除</th></tr>
+</thead>
+<tbody id="studentTable"></tbody>
+</table>
+
+<hr>
+
+<h2>生徒ログイン</h2>
+<select id="loginStudent"></select>
+<input type="password" id="loginPass" placeholder="パスワード">
+<button onclick="loginStudent()">ログイン</button>
+
+</div>
+
+<!-- ================= 生徒マイページ ================= -->
+<div id="studentArea" class="hidden">
+
+<h2 id="welcome"></h2>
+<button onclick="startStudentTest()">テスト開始</button>
+<button onclick="logout()">ログアウト</button>
+
+<h3>あなたの点数</h3>
+<p id="myScore">未受験</p>
+
+<div id="studentTestArea"></div>
+
+</div>
+
+<script>
+
+// ================= データ =================
+let students = JSON.parse(localStorage.getItem("students")) || [];
+let questions = JSON.parse(localStorage.getItem("questions")) || {};
+let currentUnit = localStorage.getItem("currentUnit") || "";
+let loginIndex = null;
+
+document.getElementById("currentUnit").textContent =
+  currentUnit || "未設定";
+
+// ================= 保存 =================
+function saveData() {
+  localStorage.setItem("students", JSON.stringify(students));
+  localStorage.setItem("questions", JSON.stringify(questions));
+  localStorage.setItem("currentUnit", currentUnit);
+}
+
+// ================= 正規化 =================
+function normalize(text) {
+  return (text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[　\s]/g, "")
+    .replace(/[。、,.]/g, "");
+}
+
+// ================= 単元 =================
+function setUnit() {
+  currentUnit = document.getElementById("unitName").value.trim();
+  document.getElementById("currentUnit").textContent =
+    currentUnit || "未設定";
+  saveData();
+  renderTable();
+  renderQuestions();
+}
+
+// ================= 生徒追加 =================
+function addStudent() {
+  const name = document.getElementById("studentName").value.trim();
+  const pass = document.getElementById("studentPass").value.trim();
+
+  if (!name || !pass) return alert("名前とパスワードを入力");
+
+  students.push({ name, password: pass, scores: {} });
+
+  saveData();
+  renderTable();
+  updateStudentSelect();
+
+  document.getElementById("studentName").value = "";
+  document.getElementById("studentPass").value = "";
+}
+
+// ================= 生徒削除 =================
+function deleteStudent(index) {
+  if (!confirm("削除しますか？")) return;
+  students.splice(index, 1);
+  saveData();
+  renderTable();
+  updateStudentSelect();
+}
+
+// ================= 生徒表 =================
+function renderTable() {
+  const tbody = document.getElementById("studentTable");
+  tbody.innerHTML = "";
+
+  students.forEach((s, i) => {
+    const score =
+      currentUnit && s.scores[currentUnit] !== undefined
+        ? s.scores[currentUnit]
+        : "";
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${s.name}</td>
+        <td>${score}</td>
+        <td><button onclick="deleteStudent(${i})">削除</button></td>
+      </tr>
+    `;
+  });
+}
+
+// ================= 問題追加 =================
+function addQuestion() {
+  if (!currentUnit) return alert("単元を設定");
+
+  const q = document.getElementById("questionText").value.trim();
+  const raw = document.getElementById("answerText").value.trim();
+  if (!q || !raw) return alert("入力不足");
+
+  const answers = raw
+    .split(/[,\uFF0C]/)
+    .map(a => normalize(a))
+    .filter(a => a !== "");
+
+  if (!questions[currentUnit]) questions[currentUnit] = [];
+
+  questions[currentUnit].push({
+    question: q,
+    answers: answers
+  });
+
+  saveData();
+  renderQuestions();
+
+  document.getElementById("questionText").value = "";
+  document.getElementById("answerText").value = "";
+}
+
+// ================= 問題削除 =================
+function deleteQuestion(index) {
+  if (!confirm("削除しますか？")) return;
+  questions[currentUnit].splice(index, 1);
+  saveData();
+  renderQuestions();
+}
+
+// ================= 問題表示 =================
+function renderQuestions() {
+  const list = document.getElementById("questionList");
+  list.innerHTML = "";
+  if (!questions[currentUnit]) return;
+
+  questions[currentUnit].forEach((q, i) => {
+    const li = document.createElement("li");
+
+    const ansText = Array.isArray(q.answers)
+      ? q.answers.join(" / ")
+      : "(旧データ)";
+
+    li.innerHTML =
+      `${q.question} → ${ansText} ` +
+      `<button onclick="deleteQuestion(${i})">削除</button>`;
+
+    list.appendChild(li);
+  });
+}
+
+// ================= セレクト更新 =================
+function updateStudentSelect() {
+  const select = document.getElementById("loginStudent");
+  select.innerHTML = "";
+  students.forEach((s, i) => {
+    const op = document.createElement("option");
+    op.value = i;
+    op.textContent = s.name;
+    select.appendChild(op);
+  });
+}
+
+// ================= ログイン =================
+function loginStudent() {
+  const index = Number(document.getElementById("loginStudent").value);
+  const pass = document.getElementById("loginPass").value;
+  const s = students[index];
+
+  if (!s || s.password !== pass) {
+    alert("パスワードが違います");
+    return;
+  }
+
+  loginIndex = index;
+
+  document.getElementById("teacherArea").classList.add("hidden");
+  document.getElementById("studentArea").classList.remove("hidden");
+  document.getElementById("welcome").textContent =
+    s.name + " のマイページ";
+
+  updateMyScore();
+}
+
+// ================= ログアウト =================
+function logout() {
+  loginIndex = null;
+  document.getElementById("teacherArea").classList.remove("hidden");
+  document.getElementById("studentArea").classList.add("hidden");
+}
+
+// ================= 生徒テスト開始 =================
+function startStudentTest() {
+  const qs = questions[currentUnit];
+  if (!qs || qs.length === 0) return alert("問題なし");
+
+  const area = document.getElementById("studentTestArea");
+  area.innerHTML = "";
+
+  qs.forEach((q, i) => {
+    area.innerHTML += `
+      <p>Q${i + 1}. ${q.question}</p>
+      <input type="text" id="stu_ans_${i}" style="width:100%;max-width:400px;">
+    `;
+  });
+
+  area.innerHTML += `<br><button onclick="gradeStudentTest()">採点</button>`;
+}
+
+// ================= 生徒採点（複数回答対応・部分一致OK） =================
+function gradeStudentTest() {
+  const qs = questions[currentUnit];
+  let correct = 0;
+
+  qs.forEach((q, i) => {
+    const input = document.getElementById(`stu_ans_${i}`);
+    if (!input) return;
+
+    const users = input.value
+      .split(/[,\uFF0C]/)
+      .map(a => normalize(a))
+      .filter(a => a !== "");
+
+    if (!Array.isArray(q.answers)) return;
+
+    const ok = users.some(user =>
+      q.answers.some(ans =>
+        user.includes(ans) || ans.includes(user)
+      )
+    );
+
+    if (ok) correct++;
+  });
+
+  const score = Math.round((correct / qs.length) * 100);
+  students[loginIndex].scores[currentUnit] = score;
+
+  saveData();
+  updateMyScore();
+
+  alert("点数：" + score + "点");
+}
+
+// ================= 自分の点数 =================
+function updateMyScore() {
+  const s = students[loginIndex];
+  const score =
+    currentUnit && s.scores[currentUnit] !== undefined
+      ? s.scores[currentUnit]
+      : "未受験";
+
+  document.getElementById("myScore").textContent = score;
+}
+
+// ================= 初期表示 =================
+renderTable();
+renderQuestions();
+updateStudentSelect();
+
+</script>
+</body>
+</html>
